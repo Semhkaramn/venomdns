@@ -1,233 +1,213 @@
+import { getStore } from "@netlify/blobs";
 import type { Config, Context } from "@netlify/functions";
 
-// Telegram API Helper
-async function sendTelegramMessage(text: string): Promise<boolean> {
-  const token = process.env.TELEGRAM_BOT_TOKEN;
-  const chatId = process.env.TELEGRAM_CHAT_ID;
+const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
 
-  if (!token || !chatId) {
-    console.error('Telegram credentials not configured');
-    return false;
-  }
-
-  try {
-    const response = await fetch(
-      `https://api.telegram.org/bot${token}/sendMessage`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          chat_id: chatId,
-          text: text,
-          parse_mode: 'HTML',
-        }),
-      }
-    );
-    const data = await response.json();
-    return data.ok;
-  } catch (error) {
-    console.error('Telegram error:', error);
-    return false;
-  }
-}
-
-// DNS kontrolü
-async function checkDNS(domain: string): Promise<{ resolved: boolean; ip?: string }> {
-  try {
-    const response = await fetch(
-      `https://dns.google/resolve?name=${domain}&type=A`,
-      { headers: { 'Accept': 'application/json' } }
-    );
-    const data = await response.json();
-    if (data.Status === 0 && data.Answer?.length > 0) {
-      const ip = data.Answer.find((a: { type: number }) => a.type === 1)?.data;
-      return { resolved: true, ip };
-    }
-    return { resolved: false };
-  } catch {
-    return { resolved: false };
-  }
+// Telegram mesaj gönder
+async function sendMessage(chatId: string, text: string) {
+  await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      chat_id: chatId,
+      text,
+      parse_mode: "HTML",
+    }),
+  });
 }
 
 // Engel göstergeleri
 const BLOCKED_INDICATORS = [
-  'uyari.btk.gov.tr',
-  'blocked.net.tr',
-  '195.175.254.2',
-  '212.175.180.166',
+  "uyari.btk.gov.tr",
+  "blocked.net.tr",
+  "195.175.254.2",
+  "212.175.180.166",
 ];
 
-// HTTP kontrolü
-async function checkHTTP(domain: string): Promise<{
-  accessible: boolean;
+// Domain kontrolü
+async function checkDomain(domain: string): Promise<{
   blocked: boolean;
-  redirectedTo?: string;
+  reason: string;
 }> {
+  // DNS kontrolü
+  let dnsResolved = false;
+  try {
+    const dnsRes = await fetch(
+      `https://dns.google/resolve?name=${domain}&type=A`
+    );
+    const dnsData = await dnsRes.json();
+    dnsResolved = dnsData.Status === 0 && dnsData.Answer?.length > 0;
+  } catch {
+    dnsResolved = false;
+  }
+
+  // HTTP kontrolü
+  let httpOk = false;
+  let redirectedTo = "";
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000);
+    setTimeout(() => controller.abort(), 10000);
 
-    const response = await fetch(`https://${domain}`, {
-      method: 'HEAD',
-      redirect: 'follow',
+    const res = await fetch(`https://${domain}`, {
+      method: "HEAD",
+      redirect: "follow",
       signal: controller.signal,
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-      },
     });
-
-    clearTimeout(timeoutId);
-    const finalUrl = response.url;
-
-    const isBlocked = BLOCKED_INDICATORS.some(
-      indicator => finalUrl.toLowerCase().includes(indicator.toLowerCase())
-    );
-
-    return {
-      accessible: response.ok,
-      blocked: isBlocked,
-      redirectedTo: finalUrl !== `https://${domain}/` ? finalUrl : undefined,
-    };
+    httpOk = res.ok;
+    redirectedTo = res.url;
   } catch {
-    // HTTPS failed, try HTTP
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000);
-
-      const response = await fetch(`http://${domain}`, {
-        method: 'HEAD',
-        redirect: 'follow',
+      setTimeout(() => controller.abort(), 10000);
+      const res = await fetch(`http://${domain}`, {
+        method: "HEAD",
+        redirect: "follow",
         signal: controller.signal,
       });
-
-      clearTimeout(timeoutId);
-      const finalUrl = response.url;
-
-      const isBlocked = BLOCKED_INDICATORS.some(
-        indicator => finalUrl.toLowerCase().includes(indicator.toLowerCase())
-      );
-
-      return {
-        accessible: response.ok,
-        blocked: isBlocked,
-        redirectedTo: finalUrl,
-      };
+      httpOk = res.ok;
+      redirectedTo = res.url;
     } catch {
-      return { accessible: false, blocked: true };
+      httpOk = false;
     }
   }
-}
 
-// Ana domain kontrol fonksiyonu
-async function checkDomain(domain: string) {
-  const cleanDomain = domain
-    .replace(/^https?:\/\//, '')
-    .replace(/^www\./, '')
-    .replace(/\/.*$/, '')
-    .trim()
-    .toLowerCase();
+  // Engel tespiti
+  const isBlocked = BLOCKED_INDICATORS.some((i) =>
+    redirectedTo.toLowerCase().includes(i.toLowerCase())
+  );
 
-  const [dnsResult, httpResult] = await Promise.all([
-    checkDNS(cleanDomain),
-    checkHTTP(cleanDomain),
-  ]);
-
-  let blocked = false;
-  let reason = 'Erişilebilir';
-
-  if (httpResult.blocked) {
-    blocked = true;
-    reason = 'BTK engel sayfasına yönlendirildi';
-  } else if (!dnsResult.resolved && !httpResult.accessible) {
-    blocked = true;
-    reason = 'DNS çözümlenemedi ve HTTP erişilemedi';
-  } else if (httpResult.redirectedTo && BLOCKED_INDICATORS.some(i => httpResult.redirectedTo?.includes(i))) {
-    blocked = true;
-    reason = 'Engel sayfasına yönlendirildi';
+  if (isBlocked) {
+    return { blocked: true, reason: "BTK engel sayfasına yönlendirildi" };
   }
-
-  return {
-    domain: cleanDomain,
-    blocked,
-    reason,
-    dnsResolved: dnsResult.resolved,
-    redirectedTo: httpResult.redirectedTo,
-  };
+  if (!dnsResolved && !httpOk) {
+    return { blocked: true, reason: "DNS ve HTTP erişilemedi" };
+  }
+  return { blocked: false, reason: "Erişilebilir" };
 }
 
-// Basit in-memory state (Netlify Blobs ile değiştirilebilir)
-// Her schedule çağrısında sıfırlanır, bu yüzden sadece değişiklikleri bildirir
-const previousStates: Map<string, boolean> = new Map();
+// Önceki durumları al
+async function getPreviousStates(
+  userId: string
+): Promise<Record<string, boolean>> {
+  try {
+    const store = getStore("domain-states");
+    const data = await store.get(`states_${userId}`, { type: "json" });
+    return (data as Record<string, boolean>) || {};
+  } catch {
+    return {};
+  }
+}
+
+// Durumları kaydet
+async function saveStates(
+  userId: string,
+  states: Record<string, boolean>
+): Promise<void> {
+  const store = getStore("domain-states");
+  await store.setJSON(`states_${userId}`, states);
+}
 
 export default async function handler(req: Request, context: Context) {
-  console.log('🔍 Domain kontrol başladı...');
+  console.log("🔍 Otomatik domain kontrolü başladı...");
 
-  // Domain listesini al
-  const domainsEnv = process.env.DOMAINS || '';
-  const domains = domainsEnv.split(',').map(d => d.trim()).filter(d => d.length > 0);
+  try {
+    const store = getStore("domains");
+    const { blobs } = await store.list();
 
-  if (domains.length === 0) {
-    console.log('❌ Domain listesi boş');
-    return new Response(JSON.stringify({ error: 'No domains configured' }), {
-      status: 400,
-      headers: { 'Content-Type': 'application/json' },
+    if (blobs.length === 0) {
+      console.log("📭 Henüz kullanıcı yok");
+      return new Response(JSON.stringify({ message: "No users" }), {
+        status: 200,
+      });
+    }
+
+    let totalChecked = 0;
+    let totalBlocked = 0;
+    let notificationsSent = 0;
+
+    // Her kullanıcı için kontrol et
+    for (const blob of blobs) {
+      const userId = blob.key.replace("user_", "");
+      const domains = (await store.get(blob.key, { type: "json" })) as string[];
+
+      if (!domains || domains.length === 0) continue;
+
+      console.log(`👤 Kullanıcı ${userId}: ${domains.length} domain`);
+
+      const previousStates = await getPreviousStates(userId);
+      const currentStates: Record<string, boolean> = {};
+
+      for (const domain of domains) {
+        const result = await checkDomain(domain);
+        currentStates[domain] = result.blocked;
+        totalChecked++;
+
+        if (result.blocked) {
+          totalBlocked++;
+        }
+
+        // Durum değişti mi? (yeni engel)
+        const wasBlocked = previousStates[domain] === true;
+        const isNowBlocked = result.blocked;
+
+        // Yeni engel tespit edildi
+        if (isNowBlocked && !wasBlocked) {
+          const message = `
+🚫 <b>DOMAIN ENGELLENDİ!</b>
+
+🌐 <b>Domain:</b> <code>${domain}</code>
+📝 <b>Sebep:</b> ${result.reason}
+🕐 <b>Tespit:</b> ${new Date().toLocaleString("tr-TR", { timeZone: "Europe/Istanbul" })}
+
+Detaylı kontrol için: /check ${domain}
+`;
+          await sendMessage(userId, message);
+          notificationsSent++;
+          console.log(`🚫 ${domain} ENGELLENDİ - Bildirim gönderildi`);
+        }
+
+        // Engel kalktı
+        if (!isNowBlocked && wasBlocked) {
+          const message = `
+✅ <b>ENGEL KALKTI!</b>
+
+🌐 <b>Domain:</b> <code>${domain}</code>
+📝 <b>Durum:</b> ${result.reason}
+🕐 <b>Tespit:</b> ${new Date().toLocaleString("tr-TR", { timeZone: "Europe/Istanbul" })}
+`;
+          await sendMessage(userId, message);
+          notificationsSent++;
+          console.log(`✅ ${domain} AÇILDI - Bildirim gönderildi`);
+        }
+      }
+
+      // Durumları kaydet
+      await saveStates(userId, currentStates);
+    }
+
+    console.log(
+      `📊 Sonuç: ${totalChecked} kontrol, ${totalBlocked} engelli, ${notificationsSent} bildirim`
+    );
+
+    return new Response(
+      JSON.stringify({
+        success: true,
+        checked: totalChecked,
+        blocked: totalBlocked,
+        notifications: notificationsSent,
+        timestamp: new Date().toISOString(),
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } }
+    );
+  } catch (error) {
+    console.error("Kontrol hatası:", error);
+    return new Response(JSON.stringify({ error: "Check failed" }), {
+      status: 500,
     });
   }
-
-  console.log(`📋 Kontrol edilecek domainler: ${domains.join(', ')}`);
-
-  const results = [];
-  const notifications = [];
-
-  for (const domain of domains) {
-    const result = await checkDomain(domain);
-    results.push(result);
-
-    // Engelliyse bildirim gönder
-    if (result.blocked) {
-      const emoji = '🚫';
-      const message = `
-${emoji} <b>DOMAIN ENGELLENDİ!</b>
-
-🌐 <b>Domain:</b> ${result.domain}
-📝 <b>Sebep:</b> ${result.reason}
-🔗 <b>DNS:</b> ${result.dnsResolved ? 'Çözüldü' : 'Çözülemedi'}
-${result.redirectedTo ? `↪️ <b>Yönlendirme:</b> ${result.redirectedTo}` : ''}
-🕐 <b>Zaman:</b> ${new Date().toLocaleString('tr-TR', { timeZone: 'Europe/Istanbul' })}
-`;
-      await sendTelegramMessage(message.trim());
-      notifications.push(result.domain);
-      console.log(`🚫 ${result.domain} ENGELLİ - Bildirim gönderildi`);
-    } else {
-      console.log(`✅ ${result.domain} erişilebilir`);
-    }
-  }
-
-  // Özet rapor
-  const blockedCount = results.filter(r => r.blocked).length;
-  if (blockedCount > 0) {
-    console.log(`📊 Sonuç: ${blockedCount}/${results.length} domain engelli`);
-  } else {
-    console.log(`✅ Tüm domainler erişilebilir`);
-  }
-
-  return new Response(
-    JSON.stringify({
-      success: true,
-      checked: results.length,
-      blocked: blockedCount,
-      notifications: notifications.length,
-      results,
-      timestamp: new Date().toISOString(),
-    }),
-    {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }
-  );
 }
 
-// Netlify Scheduled Function - Her 5 dakikada bir çalışır
+// Her 5 dakikada bir çalış
 export const config: Config = {
-  schedule: "*/5 * * * *", // Her 5 dakika
+  schedule: "*/5 * * * *",
 };
