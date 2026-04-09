@@ -128,55 +128,28 @@ async function checkDomain(domain: string): Promise<{
 
 // Komut işleyicileri
 async function handleStart(chatId: number, firstName: string) {
-  const message = `
-👋 <b>Merhaba ${firstName}!</b>
+  const message = `<b>Komutlar</b>
 
-Ben <b>Domain Engel Kontrol Botu</b>yum.
-
-Türkiye'de engellenmiş domainleri takip eder ve sana bildirim gönderirim.
-
-<b>📋 Komutlar:</b>
-
-/add <code>domain.com</code> - Domain ekle
-/remove <code>domain.com</code> - Domain çıkar
-/list - Domainlerini listele
-/check - Tüm domainleri kontrol et
-/check <code>domain.com</code> - Tek domain kontrol
-/help - Yardım
-
-<b>🔔 Otomatik Kontrol:</b>
-Eklediğin domainler her 5 dakikada bir kontrol edilir. Engel tespit edilirse sana haber veririm!
-`;
+/add domain.com - Ekle
+/remove domain.com - Çıkar
+/list - Listele
+/check - Kontrol et`;
   await sendMessage(chatId, message);
 }
 
 async function handleHelp(chatId: number) {
-  const message = `
-📖 <b>Yardım</b>
-
-<b>Domain Ekleme:</b>
-<code>/add example.com</code>
-<code>/add site1.com site2.net</code>
-
-<b>Domain Çıkarma:</b>
-<code>/remove example.com</code>
-
-<b>Listeleme:</b>
-<code>/list</code>
-
-<b>Manuel Kontrol:</b>
-<code>/check</code> - Tüm domainler
-<code>/check example.com</code> - Tek domain
-`;
+  const message = `/add domain.com - Ekle
+/add site1.com site2.com - Çoklu ekle
+/remove domain.com - Çıkar
+/list - Listele
+/check - Tümünü kontrol et
+/check domain.com - Tek kontrol`;
   await sendMessage(chatId, message);
 }
 
 async function handleAdd(chatId: number, userId: number, args: string[]) {
   if (args.length === 0) {
-    await sendMessage(
-      chatId,
-      "❌ Kullanım: <code>/add domain.com</code>",
-    );
+    await sendMessage(chatId, "Kullanım: /add domain.com");
     return;
   }
 
@@ -205,32 +178,27 @@ async function handleAdd(chatId: number, userId: number, args: string[]) {
   if (added.length > 0) {
     const saved = await saveDomains(userId, domains);
     if (!saved) {
-      await sendMessage(
-        chatId,
-        "❌ Domain kaydedilirken bir hata oluştu. Lütfen tekrar deneyin.",
-      );
+      await sendMessage(chatId, "Hata: Kaydedilemedi");
       return;
     }
   }
 
   let message = "";
   if (added.length > 0) {
-    message += `✅ <b>Eklendi:</b>\n${added.map((d) => `• ${d}`).join("\n")}\n\n`;
+    message += `Eklendi: ${added.join(", ")}`;
   }
   if (exists.length > 0) {
-    message += `⚠️ <b>Zaten ekli:</b>\n${exists.map((d) => `• ${d}`).join("\n")}\n\n`;
+    if (message) message += "\n";
+    message += `Zaten ekli: ${exists.join(", ")}`;
   }
-  message += `📊 Toplam ${domains.length} domain takip ediliyor.`;
+  message += `\nToplam: ${domains.length}`;
 
   await sendMessage(chatId, message);
 }
 
 async function handleRemove(chatId: number, userId: number, args: string[]) {
   if (args.length === 0) {
-    await sendMessage(
-      chatId,
-      "❌ Kullanım: <code>/remove domain.com</code>",
-    );
+    await sendMessage(chatId, "Kullanım: /remove domain.com");
     return;
   }
 
@@ -252,22 +220,20 @@ async function handleRemove(chatId: number, userId: number, args: string[]) {
   if (removed.length > 0) {
     const saved = await saveDomains(userId, domains);
     if (!saved) {
-      await sendMessage(
-        chatId,
-        "❌ Domain kaydedilirken bir hata oluştu. Lütfen tekrar deneyin.",
-      );
+      await sendMessage(chatId, "Hata: Kaydedilemedi");
       return;
     }
   }
 
   let message = "";
   if (removed.length > 0) {
-    message += `🗑️ <b>Çıkarıldı:</b>\n${removed.map((d) => `• ${d}`).join("\n")}\n\n`;
+    message += `Çıkarıldı: ${removed.join(", ")}`;
   }
   if (notFound.length > 0) {
-    message += `⚠️ <b>Bulunamadı:</b>\n${notFound.map((d) => `• ${d}`).join("\n")}\n\n`;
+    if (message) message += "\n";
+    message += `Bulunamadı: ${notFound.join(", ")}`;
   }
-  message += `📊 Toplam ${domains.length} domain takip ediliyor.`;
+  message += `\nToplam: ${domains.length}`;
 
   await sendMessage(chatId, message);
 }
@@ -276,20 +242,11 @@ async function handleList(chatId: number, userId: number) {
   const domains = await getDomains(userId);
 
   if (domains.length === 0) {
-    await sendMessage(
-      chatId,
-      "📭 Henüz domain eklememişsin.\n\n<code>/add domain.com</code> ile ekleyebilirsin.",
-    );
+    await sendMessage(chatId, "Liste boş");
     return;
   }
 
-  const message = `
-📋 <b>Domain Listesi</b> (${domains.length})
-
-${domains.map((d, i) => `${i + 1}. <code>${d}</code>`).join("\n")}
-
-Her 5 dakikada bir otomatik kontrol edilir.
-`;
+  const message = domains.map((d, i) => `${i + 1}. ${d}`).join("\n");
   await sendMessage(chatId, message);
 }
 
@@ -302,20 +259,9 @@ async function handleCheck(chatId: number, userId: number, args: string[]) {
       .toLowerCase()
       .trim();
 
-    await sendMessage(chatId, `🔍 <code>${domain}</code> kontrol ediliyor...`);
-
     const result = await checkDomain(domain);
-    const emoji = result.blocked ? "🚫" : "✅";
-    const status = result.blocked ? "ENGELLİ" : "AÇIK";
-
-    const message = `
-${emoji} <b>${status}</b>
-
-🌐 <b>Domain:</b> <code>${domain}</code>
-📝 <b>Durum:</b> ${result.reason}
-🕐 <b>Kontrol:</b> ${new Date().toLocaleString("tr-TR", { timeZone: "Europe/Istanbul" })}
-`;
-    await sendMessage(chatId, message);
+    const status = result.blocked ? "ENGELLI" : "ACIK";
+    await sendMessage(chatId, `${domain}: ${status}`);
     return;
   }
 
@@ -323,52 +269,30 @@ ${emoji} <b>${status}</b>
   const domains = await getDomains(userId);
 
   if (domains.length === 0) {
-    await sendMessage(
-      chatId,
-      "📭 Kontrol edilecek domain yok.\n\n<code>/add domain.com</code> ile ekleyebilirsin.",
-    );
+    await sendMessage(chatId, "Liste boş");
     return;
   }
 
-  await sendMessage(
-    chatId,
-    `🔍 ${domains.length} domain kontrol ediliyor...`,
-  );
-
-  const results: { domain: string; blocked: boolean; reason: string }[] = [];
+  const results: { domain: string; blocked: boolean }[] = [];
 
   for (const domain of domains) {
     const result = await checkDomain(domain);
-    results.push({ domain, ...result });
+    results.push({ domain, blocked: result.blocked });
   }
 
   const blocked = results.filter((r) => r.blocked);
   const open = results.filter((r) => !r.blocked);
 
-  let message = `
-📊 <b>Kontrol Sonuçları</b>
-
-✅ Açık: ${open.length}
-🚫 Engelli: ${blocked.length}
-
-`;
+  let message = "";
 
   if (blocked.length > 0) {
-    message += `<b>🚫 Engelli Domainler:</b>\n`;
-    for (const r of blocked) {
-      message += `• <code>${r.domain}</code>\n  └ ${r.reason}\n`;
-    }
-    message += "\n";
+    message += `ENGELLI:\n${blocked.map((r) => r.domain).join("\n")}`;
   }
 
   if (open.length > 0) {
-    message += `<b>✅ Açık Domainler:</b>\n`;
-    for (const r of open) {
-      message += `• <code>${r.domain}</code>\n`;
-    }
+    if (message) message += "\n\n";
+    message += `ACIK:\n${open.map((r) => r.domain).join("\n")}`;
   }
-
-  message += `\n🕐 ${new Date().toLocaleString("tr-TR", { timeZone: "Europe/Istanbul" })}`;
 
   await sendMessage(chatId, message);
 }
