@@ -108,14 +108,14 @@ async function saveStates(
 }
 
 export default async function handler(req: Request, context: Context) {
-  console.log("🔍 Otomatik domain kontrolü başladı...");
+  console.log("Domain kontrolu basladi");
 
   try {
     const store = getStore("domains");
     const { blobs } = await store.list();
 
     if (blobs.length === 0) {
-      console.log("📭 Henüz kullanıcı yok");
+      console.log("Kullanici yok");
       return new Response(JSON.stringify({ message: "No users" }), {
         status: 200,
       });
@@ -132,7 +132,7 @@ export default async function handler(req: Request, context: Context) {
 
       if (!domains || domains.length === 0) continue;
 
-      console.log(`👤 Kullanıcı ${userId}: ${domains.length} domain`);
+      console.log(`User ${userId}: ${domains.length} domain`);
 
       const previousStates = await getPreviousStates(userId);
       const currentStates: Record<string, boolean> = {};
@@ -152,32 +152,16 @@ export default async function handler(req: Request, context: Context) {
 
         // Yeni engel tespit edildi
         if (isNowBlocked && !wasBlocked) {
-          const message = `
-🚫 <b>DOMAIN ENGELLENDİ!</b>
-
-🌐 <b>Domain:</b> <code>${domain}</code>
-📝 <b>Sebep:</b> ${result.reason}
-🕐 <b>Tespit:</b> ${new Date().toLocaleString("tr-TR", { timeZone: "Europe/Istanbul" })}
-
-Detaylı kontrol için: /check ${domain}
-`;
-          await sendMessage(userId, message);
+          await sendMessage(userId, `ENGEL: ${domain}`);
           notificationsSent++;
-          console.log(`🚫 ${domain} ENGELLENDİ - Bildirim gönderildi`);
+          console.log(`${domain} ENGELLENDİ`);
         }
 
         // Engel kalktı
         if (!isNowBlocked && wasBlocked) {
-          const message = `
-✅ <b>ENGEL KALKTI!</b>
-
-🌐 <b>Domain:</b> <code>${domain}</code>
-📝 <b>Durum:</b> ${result.reason}
-🕐 <b>Tespit:</b> ${new Date().toLocaleString("tr-TR", { timeZone: "Europe/Istanbul" })}
-`;
-          await sendMessage(userId, message);
+          await sendMessage(userId, `ACIK: ${domain}`);
           notificationsSent++;
-          console.log(`✅ ${domain} AÇILDI - Bildirim gönderildi`);
+          console.log(`${domain} ACILDI`);
         }
       }
 
@@ -185,9 +169,7 @@ Detaylı kontrol için: /check ${domain}
       await saveStates(userId, currentStates);
     }
 
-    console.log(
-      `📊 Sonuç: ${totalChecked} kontrol, ${totalBlocked} engelli, ${notificationsSent} bildirim`
-    );
+    console.log(`Sonuc: ${totalChecked} kontrol, ${totalBlocked} engelli, ${notificationsSent} bildirim`);
 
     return new Response(
       JSON.stringify({
