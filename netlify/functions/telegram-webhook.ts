@@ -5,32 +5,50 @@ const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
 
 // Telegram mesaj gönder
 async function sendMessage(chatId: number, text: string, parseMode = "HTML") {
-  await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      chat_id: chatId,
-      text,
-      parse_mode: parseMode,
-    }),
-  });
+  try {
+    const response = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text,
+        parse_mode: parseMode,
+      }),
+    });
+    console.log("Telegram response:", await response.text());
+  } catch (error) {
+    console.error("Telegram send error:", error);
+  }
 }
 
 // Domain listesini al
 async function getDomains(userId: number): Promise<string[]> {
   try {
     const store = getStore("domains");
-    const data = await store.get(`user_${userId}`, { type: "json" });
+    const key = `user_${userId}`;
+    console.log(`Getting domains for key: ${key}`);
+    const data = await store.get(key, { type: "json" });
+    console.log(`Retrieved data:`, data);
     return (data as string[]) || [];
-  } catch {
+  } catch (error) {
+    console.error("getDomains error:", error);
     return [];
   }
 }
 
 // Domain listesini kaydet
-async function saveDomains(userId: number, domains: string[]): Promise<void> {
-  const store = getStore("domains");
-  await store.setJSON(`user_${userId}`, domains);
+async function saveDomains(userId: number, domains: string[]): Promise<boolean> {
+  try {
+    const store = getStore("domains");
+    const key = `user_${userId}`;
+    console.log(`Saving domains for key: ${key}`, domains);
+    await store.setJSON(key, domains);
+    console.log(`Successfully saved domains for ${key}`);
+    return true;
+  } catch (error) {
+    console.error("saveDomains error:", error);
+    return false;
+  }
 }
 
 // Domain kontrolü
@@ -185,7 +203,14 @@ async function handleAdd(chatId: number, userId: number, args: string[]) {
   }
 
   if (added.length > 0) {
-    await saveDomains(userId, domains);
+    const saved = await saveDomains(userId, domains);
+    if (!saved) {
+      await sendMessage(
+        chatId,
+        "❌ Domain kaydedilirken bir hata oluştu. Lütfen tekrar deneyin.",
+      );
+      return;
+    }
   }
 
   let message = "";
@@ -225,7 +250,14 @@ async function handleRemove(chatId: number, userId: number, args: string[]) {
   }
 
   if (removed.length > 0) {
-    await saveDomains(userId, domains);
+    const saved = await saveDomains(userId, domains);
+    if (!saved) {
+      await sendMessage(
+        chatId,
+        "❌ Domain kaydedilirken bir hata oluştu. Lütfen tekrar deneyin.",
+      );
+      return;
+    }
   }
 
   let message = "";
